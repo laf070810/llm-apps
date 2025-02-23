@@ -17,10 +17,11 @@ Grammar Fixer是一个利用LLM对单个或多个文本文件中的英语文本�
 
 ### 安装依赖
 1. 使用前需安装依赖：
-```bash
-pip install openai requests
-```
 
+```bash
+pip install requests  # 基础依赖
+pip install openai    # 仅在使用OpenAI API时需要
+```
 
 ### 基本用法
 ```bash
@@ -102,8 +103,8 @@ python grammar_fixer.py blog_posts \
 | `--output`      | 否         | combined.patch  | 输出补丁文件名                                                           |
 | `--chunk-size`  | 否         | 0               | 文件分块大小（KB），0表示禁用分块                                        |
 | `--extensions`  | 否         | .txt,.md,.tex   | 要处理的文件扩展名（逗号分隔）                                           |
-| `--resume`      | 否         | -               | 断点续传模式（自动从上次中断处继续）                                     |
-| `--clean-cache` | 否         | -               | 清理缓存重新处理（强制全量处理）                                         |
+| `--resume`      | 否         | true            | 断点续传模式（自动从上次中断处继续），默认启用                           |
+| `--clean-cache` | 否         | -               | 清理缓存并退出（不进行文本处理）                                         |
 
 ## 注意事项
 1. API密钥处理：

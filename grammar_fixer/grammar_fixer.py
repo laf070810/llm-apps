@@ -7,7 +7,7 @@ import os
 import re
 import subprocess
 import sys
-from typing import Optional
+import time
 
 import requests
 
@@ -41,6 +41,12 @@ def save_cache(cache_data: dict, cache_dir: str = CACHE_DIR):
         json.dump(cache_data, f, indent=2)
 
 
+def clean_cache(cache_dir: str = CACHE_DIR):
+    cache_path = os.path.join(cache_dir, CACHE_FILENAME)
+    if os.path.exists(cache_path):
+        os.remove(cache_path)
+
+
 def get_file_signature(filepath: str) -> dict:
     """Get unique file signature using mtime and size"""
     stat = os.stat(filepath)
@@ -49,6 +55,22 @@ def get_file_signature(filepath: str) -> dict:
         "size": stat.st_size,
         "path": os.path.relpath(filepath, start=os.path.dirname(filepath)),
     }
+
+
+def get_processed_chunks(file_path: str, cache: dict | None, chunk_size: int) -> int:
+    input_file_signature = get_file_signature(file_path)
+    return (
+        sum(
+            1
+            for v in cache.values()
+            if (v["input_file"]["mtime"] == input_file_signature["mtime"])
+            and (v["input_file"]["size"] == input_file_signature["size"])
+            and (v["input_file"]["path"] == input_file_signature["path"])
+            and (v["input_file"]["chunk_size"] == chunk_size)
+        )
+        if cache
+        else 0
+    )
 
 
 def split_text_file(content: str, chunk_size: int) -> list[tuple[str, int]]:
@@ -76,8 +98,15 @@ def split_text_file(content: str, chunk_size: int) -> list[tuple[str, int]]:
     return chunks
 
 
-def is_text_file(filepath: str) -> bool:
+def is_text_file(
+    filepath: str,
+    extensions: list[str] | None = [".txt", ".md", ".tex", ".html", ".css", ".js"],
+) -> bool:
     """Check if a file is text-based using multiple methods"""
+    # 0. Ensure it is not directory and skip patch files
+    if (not os.path.isfile(filepath)) or filepath.endswith(".patch"):
+        return False
+
     # 1. Check MIME type
     mime, _ = mimetypes.guess_type(filepath)
     if mime and mime.startswith("text/"):
@@ -85,7 +114,7 @@ def is_text_file(filepath: str) -> bool:
 
     # 2. Check file extension
     ext = os.path.splitext(filepath)[1].lower()
-    if ext in {".txt", ".md", ".tex", ".html", ".css", ".js"}:
+    if (extensions is not None) and (ext in extensions):
         return True
 
     # 3. Read first 1024 bytes to check for null bytes
@@ -107,8 +136,8 @@ def process_text_file(
     model: str,
     chunk_size: int = 0,
     api_type: str = "openai",
-    cache: Optional[dict] = None,
-) -> Optional[str]:
+    cache: dict | None = None,
+) -> str | None:
     """Process a single text file with LLM API
 
     Args:
@@ -123,8 +152,6 @@ def process_text_file(
     Returns:
         Generated diff content or None if processing failed
     """
-    import time
-
     start_time = time.time()
 
     print(f"\033[1;34m\n{'='*40}\nProcessing: {file_path}\n{'='*40}\033[0m")
@@ -138,15 +165,9 @@ def process_text_file(
 
     try:
         file_ext = os.path.splitext(file_path)[1]
-        processed_chunks = (
-            sum(
-                1
-                for k in cache
-                if k.startswith(f"{get_file_signature(file_path)['path']}_chunk_")
-            )
-            if cache
-            else 0
-        )
+
+        # Check cache
+        processed_chunks = get_processed_chunks(file_path, cache, chunk_size)
 
         # Skip already processed chunks
         chunks = chunks[processed_chunks:]
@@ -251,12 +272,15 @@ def process_text_file(
 
             # Save cache after each chunk
             if cache is not None:
-                file_sig = get_file_signature(file_path)
-                cache_key = f"{file_sig['path']}_chunk_{i}"
-                cache[cache_key] = file_sig
+                cache_key = time.time()
+                cache[cache_key] = {}
+                cache[cache_key]["input_file"] = get_file_signature(file_path)
+                cache[cache_key]["input_file"]["chunk_size"] = chunk_size
+                cache[cache_key]["output_file"] = get_file_signature(temp_file)
+                cache[cache_key]["output_file"]["chunk_index"] = i
                 save_cache(cache)
 
-        # Combine all chunks into final file
+        # Combine all chunks into the final file
         corrected_content = ""
         for i in range(1, total_chunk_num + 1):
             temp_file = os.path.join(
@@ -296,9 +320,9 @@ def process_file(
     model: str,
     chunk_size: int = 0,
     api_type: str = "openai",
-    extensions: Optional[list[str]] = None,
+    extensions: list[str] | None = None,
     resume: bool = False,
-) -> Optional[str]:
+) -> str | None:
     """Process a single file with LLM API
 
     Args:
@@ -314,7 +338,7 @@ def process_file(
         Diff content or None if processing skipped/failed
     """
     # Validate file extension
-    if extensions and os.path.splitext(file_path)[1].lower() not in extensions:
+    if not is_text_file(file_path, extensions):
         print(f"\033[33mSkipping unsupported file type: {file_path}\033[0m")
         return None
 
@@ -331,9 +355,8 @@ def process_directory(
     model: str,
     chunk_size: int = 0,
     api_type: str = "openai",
-    extensions: Optional[list[str]] = None,
+    extensions: list[str] | None = None,
     resume: bool = False,
-    clean_cache: bool = False,
 ) -> list[str]:
     """Process all valid files in a directory
 
@@ -346,18 +369,13 @@ def process_directory(
         api_type: Type of API service (openai/ollama)
         extensions: Allowed file extensions
         resume: Enable resume mode using cache
-        clean_cache: Clear existing cache before processing
 
     Returns:
         List of generated patch file paths
     """
     patch_files = []
 
-    if clean_cache:
-        cache_path = os.path.join(CACHE_DIR, CACHE_FILENAME)
-        if os.path.exists(cache_path):
-            os.remove(cache_path)
-
+    # Load cache
     cache = load_cache() if resume else {}
 
     # Get all files except .patch files
@@ -366,41 +384,25 @@ def process_directory(
     # Filter files
     input_files = []
     for f in all_files:
-        if (
-            f.endswith(".patch")
-            or not os.path.isfile(f)
-            or (extensions and os.path.splitext(f)[1].lower() not in extensions)
-            or not is_text_file(f)
-        ):
+        if not is_text_file(f, extensions):
             continue
 
-        file_sig = get_file_signature(f)
-        # Check chunks in resume mode
-        if resume:
-            processed_chunks = sum(1 for k in cache if k.startswith(file_sig["path"]))
-            if processed_chunks > 0:
-                print(f"\033[33mResuming from chunk {processed_chunks} for: {f}\033[0m")
-                input_files.append(f)
-                continue
+        input_files.append(f)
 
-        # Only add new files not in cache
-        if not resume or file_sig["path"] not in cache:
-            input_files.append(f)
-
+    # Print file count
     total_files = len(input_files)
-    print(
-        f"\n\033[1;35mFound {total_files} files to process ({len(cache)} cached)\033[0m"
-    )
+    print(f"\n\033[1;35mFound {total_files} files to process\033[0m")
 
+    # Process files
     for i, input_file in enumerate(input_files, 1):
-        file_sig = get_file_signature(input_file)
-        cache_key = file_sig["path"]
         print(f"\n\033[1;36mProcessing file {i}/{total_files}\033[0m")
 
         # Get number of processed chunks from cache
-        processed_chunks = sum(1 for k in cache if k.startswith(f"{cache_key}_chunk_"))
-        if processed_chunks > 0:
-            print(f"\033[33mResuming from chunk {processed_chunks+1}\033[0m")
+        # processed_chunks = get_processed_chunks(input_file, cache, chunk_size)
+        # if processed_chunks > 0:
+        #     print(
+        #         f"\033[33mResuming from chunk {processed_chunks + 1} for: {input_file}\033[0m"
+        #     )
 
         diff_content = process_text_file(
             input_file, api_base, api_key, model, chunk_size, api_type, cache
@@ -414,13 +416,6 @@ def process_directory(
         print(f"\033[32mGenerated patch file: {patch_file}\033[0m")
         patch_files.append(patch_file)
 
-        # Update cache only after successful processing
-        cache[cache_key] = file_sig
-        # Save cache after every file
-        save_cache(cache)
-
-    # Final cache save
-    save_cache(cache)
     return patch_files
 
 
@@ -490,18 +485,20 @@ def main():
     parser.add_argument(
         "--resume",
         action="store_true",
-        help="Resume previous processing using cache",
+        default=True,
+        help="Resume previous processing using cache and save new cache. If False, ignore existing cache and do not save new cache",
     )
     parser.add_argument(
         "--clean-cache",
         action="store_true",
-        help="Clear existing cache before processing",
+        help="Clear existing cache and exit",
     )
 
     args = parser.parse_args()
 
-    if args.resume and args.clean_cache:
-        print("Error: Cannot use both --resume and --clean-cache")
+    # Clean cache and exit if specified
+    if args.clean_cache:
+        clean_cache()
         return
 
     # Parse extensions
@@ -543,7 +540,6 @@ def main():
             args.api,
             extensions,
             args.resume,
-            args.clean_cache,
         )
         if patch_files:
             combine_patches(patch_files, args.output)
