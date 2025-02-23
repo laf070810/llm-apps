@@ -108,9 +108,21 @@ def process_text_file(
     chunk_size: int = 0,
     api_type: str = "openai",
     cache: Optional[dict] = None,
-    input_dir: Optional[str] = None,
 ) -> Optional[str]:
-    """Process a single file with OpenAI API"""
+    """Process a single text file with LLM API
+
+    Args:
+        file_path: Path to the text file to process
+        api_base: Base URL for the API endpoint
+        api_key: API authentication key
+        model: Model name/tag to use
+        chunk_size: Split content into chunks (KB), 0 for no splitting
+        api_type: API provider type (openai/ollama)
+        cache: Optional cache dictionary for resume functionality
+
+    Returns:
+        Generated diff content or None if processing failed
+    """
     import time
 
     start_time = time.time()
@@ -238,7 +250,7 @@ def process_text_file(
             print(f"\n\033[32mSaved temporary patch file: {temp_file}\033[0m")
 
             # Save cache after each chunk
-            if cache is not None and input_dir is not None:
+            if cache is not None:
                 file_sig = get_file_signature(file_path)
                 cache_key = f"{file_sig['path']}_chunk_{i}"
                 cache[cache_key] = file_sig
@@ -271,10 +283,45 @@ def process_text_file(
 
 
 def generate_diff(original_path: str, corrected_path: str) -> str:
-    """Generate git-style diff"""
+    """Generate git-style diff between original and corrected files"""
     return subprocess.run(
         f"diff -u {original_path} {corrected_path}", shell=True, capture_output=True
     ).stdout.decode()
+
+
+def process_file(
+    file_path: str,
+    api_base: str,
+    api_key: str,
+    model: str,
+    chunk_size: int = 0,
+    api_type: str = "openai",
+    extensions: Optional[list[str]] = None,
+    resume: bool = False,
+) -> Optional[str]:
+    """Process a single file with LLM API
+
+    Args:
+        file_path: Path to the file to process
+        api_base: API endpoint URL
+        api_key: Authentication key for the API
+        model: Model identifier to use
+        chunk_size: Maximum chunk size in KB (0 for no chunking)
+        api_type: Type of API service (openai/ollama)
+        extensions: Allowed file extensions for processing
+
+    Returns:
+        Diff content or None if processing skipped/failed
+    """
+    # Validate file extension
+    if extensions and os.path.splitext(file_path)[1].lower() not in extensions:
+        print(f"\033[33mSkipping unsupported file type: {file_path}\033[0m")
+        return None
+
+    cache = load_cache() if resume else None
+    return process_text_file(
+        file_path, api_base, api_key, model, chunk_size, api_type, cache
+    )
 
 
 def process_directory(
@@ -288,11 +335,21 @@ def process_directory(
     resume: bool = False,
     clean_cache: bool = False,
 ) -> list[str]:
-    """Process files in directory and return list of patch files
+    """Process all valid files in a directory
 
     Args:
-        resume: Enable resume mode using processing cache
-        clean_cache: Remove existing cache before processing
+        input_dir: Directory to scan for files
+        api_base: API endpoint URL
+        api_key: Authentication key for the API
+        model: Model identifier to use
+        chunk_size: Maximum chunk size in KB (0 for no chunking)
+        api_type: Type of API service (openai/ollama)
+        extensions: Allowed file extensions
+        resume: Enable resume mode using cache
+        clean_cache: Clear existing cache before processing
+
+    Returns:
+        List of generated patch file paths
     """
     patch_files = []
 
@@ -307,7 +364,6 @@ def process_directory(
     all_files = glob.glob(os.path.join(input_dir, "**", "*"), recursive=True)
 
     # Filter files
-    # Filter files and check cache
     input_files = []
     for f in all_files:
         if (
@@ -347,7 +403,7 @@ def process_directory(
             print(f"\033[33mResuming from chunk {processed_chunks+1}\033[0m")
 
         diff_content = process_text_file(
-            input_file, api_base, api_key, model, chunk_size, api_type, cache, input_dir
+            input_file, api_base, api_key, model, chunk_size, api_type, cache
         )
         if not diff_content:
             continue
@@ -363,72 +419,83 @@ def process_directory(
         # Save cache after every file
         save_cache(cache)
 
-    # Final cache save (already saved by loop)
+    # Final cache save
     save_cache(cache)
     return patch_files
 
 
 def combine_patches(patch_files: list[str], output_file: str) -> None:
-    """Combine multiple patch files into one"""
+    """Combine multiple patch files into a single output file
+
+    Args:
+        patch_files: List of paths to patch files
+        output_file: Path for combined output file
+    """
     print(f"\n\033[1;35mCombining {len(patch_files)} patch files...\033[0m")
     with open(output_file, "w") as outfile:
         for i, patch_file in enumerate(patch_files, 1):
             print(f"\033[33mMerging ({i}/{len(patch_files)}): {patch_file}\033[0m")
             with open(patch_file, "r") as infile:
                 outfile.write(infile.read())
-            # os.remove(patch_file)
     print(f"\033[1;32mSuccessfully created combined patch: {output_file}\033[0m")
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Grammar Fixer for Text Files")
-    parser.add_argument("input_dir", help="Directory containing input files")
+    """Main entry point for the grammar fixer CLI"""
+    parser = argparse.ArgumentParser(
+        description="Grammar Fixer - Correct text files using LLM APIs",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    parser.add_argument("input_path", help="Input path (file or directory) to process")
     parser.add_argument(
         "--extensions",
         default=".txt,.md,.tex",
-        help="Comma-separated list of file extensions to process (default: .txt,.md,.tex)",
+        help="Comma-separated list of file extensions to process",
     )
     parser.add_argument(
         "--api",
         choices=["openai", "ollama"],
         required=True,
-        help="API provider to use (openai/ollama)",
+        help="API provider to use",
     )
     parser.add_argument(
         "--api-base",
         required=True,
-        help="API base URL (e.g. OpenAI endpoint or Ollama server)",
+        help="API endpoint URL (e.g. https://api.openai.com/v1 or http://localhost:11434)",
     )
-    parser.add_argument("--api-key", help="API key (required for OpenAI)")
     parser.add_argument(
-        "--output", default="combined.patch", help="Output patch file name"
+        "--api-key",
+        help="API key (required for OpenAI)",
+    )
+    parser.add_argument(
+        "--output",
+        default="combined.patch",
+        help="Output patch file name (for single file processing)",
     )
     parser.add_argument(
         "--model",
         default=(
             "gpt-4-turbo-preview"
-            if sys.argv[1:]
-            and "--api" in sys.argv
-            and sys.argv[sys.argv.index("--api") + 1] == "openai"
+            if "--api openai" in " ".join(sys.argv)
             else "llama3:8b"
         ),
-        help="Model to use (OpenAI model name or Ollama model tag)",
+        help="Model name to use",
     )
     parser.add_argument(
         "--chunk-size",
         type=int,
         default=0,
-        help="Split files into chunks of specified size (KB) for processing. 0 means no splitting",
+        help="Split large files into chunks (KB), 0 to disable chunking",
     )
     parser.add_argument(
         "--resume",
         action="store_true",
-        help="Resume previous processing using cache (.gf_cache.json)",
+        help="Resume previous processing using cache",
     )
     parser.add_argument(
         "--clean-cache",
         action="store_true",
-        help="Remove existing cache before processing",
+        help="Clear existing cache before processing",
     )
 
     args = parser.parse_args()
@@ -437,30 +504,53 @@ def main():
         print("Error: Cannot use both --resume and --clean-cache")
         return
 
-    # Parse extensions (ensure list type)
+    # Parse extensions
     extensions = (
-        list({ext.strip().lower() for ext in args.extensions.split(",")})
+        [ext.strip().lower() for ext in args.extensions.split(",")]
         if args.extensions
         else []
     )
 
-    if not os.path.isdir(args.input_dir):
-        print(f"Error: {args.input_dir} is not a valid directory")
+    if not os.path.exists(args.input_path):
+        print(f"Error: {args.input_path} does not exist")
         return
 
-    patch_files = process_directory(
-        args.input_dir,
-        args.api_base,
-        args.api_key,
-        args.model,
-        args.chunk_size,
-        args.api,
-        extensions=extensions,
-        resume=args.resume,
-        clean_cache=args.clean_cache,
-    )
-    combine_patches(patch_files, args.output)
-    print(f"\033[1;32mSuccessfully generated combined patch file: {args.output}\033[0m")
+    # Process based on input type
+    if os.path.isfile(args.input_path):
+        # Single file processing
+        diff_content = process_file(
+            args.input_path,
+            args.api_base,
+            args.api_key,
+            args.model,
+            args.chunk_size,
+            args.api,
+            extensions,
+            args.resume,
+        )
+        if diff_content:
+            with open(args.output, "w") as f:
+                f.write(diff_content)
+            print(f"\033[1;32mGenerated patch file: {args.output}\033[0m")
+    else:
+        # Directory processing
+        patch_files = process_directory(
+            args.input_path,
+            args.api_base,
+            args.api_key,
+            args.model,
+            args.chunk_size,
+            args.api,
+            extensions,
+            args.resume,
+            args.clean_cache,
+        )
+        if patch_files:
+            combine_patches(patch_files, args.output)
+        else:
+            print("\033[33mNo files processed\033[0m")
+
+    print(f"\033[1;32mProcessing completed\033[0m")
 
 
 if __name__ == "__main__":
