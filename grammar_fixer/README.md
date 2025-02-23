@@ -105,6 +105,23 @@ python grammar_fixer.py blog_posts \
 | `--resume`      | 否         | -               | 断点续传模式（自动从上次中断处继续）                                     |
 | `--clean-cache` | 否         | -               | 清理缓存重新处理（强制全量处理）                                         |
 
+## 注意事项
+1. API密钥处理：
+   - OpenAI密钥通过--api-key参数传递
+   - Ollama本地部署无需密钥
+2. 缓存文件：
+   - 包含文件处理进度和元数据
+   - 存储于项目目录的.cache/文件夹
+   - 不应分享给他人或提交到版本控制
+3. 补丁安全：
+   - **生成后建议用文本编辑器检查变更**
+   - **如果想修改生成的diff文件里的错误，不建议直接改diff文件本身，因为改了有可能会导致diff匹配不出来，尤其是在diff文件比较大、需要修改的地方比较多的情况下。在diff文件本身比较大或对diff文件的改动比较多时，最好将文档仓库先用git来commit一下，然后直接应用这个diff文件，再根据git的diff情况来修改**
+   - 应用前可以考虑备份原始文件：
+     ```bash
+     cp -r input_dir/ input_dir_backup/
+     ```
+   - 支持撤销补丁：`patch -R < grammar_fixes.patch`
+
 ## 功能细节
 ### 文件处理流程
 1. 检查输入类型（文件/目录）
@@ -128,19 +145,3 @@ python grammar_fixer.py blog_posts \
 - 大文件会被分割为指定大小的文本块
 - 每个块独立处理并缓存进度
 - 保持完整的行结构（不会在行中间分割）
-
-### 安全注意事项
-1. API密钥处理：
-   - OpenAI密钥通过--api-key参数传递
-   - Ollama本地部署无需密钥
-2. 缓存文件：
-   - 包含文件处理进度和元数据
-   - 存储于项目目录的.cache/文件夹
-   - 不应分享给他人或提交到版本控制
-3. 补丁安全：
-   - 生成后建议用文本编辑器检查变更
-   - 应用前备份原始文件：
-     ```bash
-     cp -r input_dir/ input_dir_backup/
-     ```
-   - 支持撤销补丁：`patch -R < grammar_fixes.patch`
