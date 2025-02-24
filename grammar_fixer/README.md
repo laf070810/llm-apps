@@ -1,6 +1,6 @@
 # Grammar Fixer 脚本使用文档
 
-Grammar Fixer是一个利用LLM对单个或多个文本文件中的英语文本进行语法纠错的工具。输入为要检查的文本文件路径或包含多个文本文件的目录，输出为英语语法纠错后的unified diff文件。
+Grammar Fixer是一个利用LLM对单个或多个文本文件中的英语文本进行语法纠错的工具。输入为要检查的文本文件路径或包含多个文本文件的目录，输出为英语语法纠错后的unified diff文件，可使用`patch`命令进行应用。
 
 ## 主要功能
 - ✅ 支持多种文本格式（.txt, .md, .tex, .html等）
@@ -16,11 +16,15 @@ Grammar Fixer是一个利用LLM对单个或多个文本文件中的英语文本�
 ## 快速开始
 
 ### 安装依赖
-1. 使用前需安装依赖：
-
 ```bash
 pip install requests  # 基础依赖
 pip install openai    # 仅在使用OpenAI API时需要
+```
+
+### 下载本脚本
+```bash
+git clone https://github.com/laf070810/llm-apps.git
+cd llm-apps/grammar_fixer/
 ```
 
 ### 基本用法
@@ -30,14 +34,14 @@ python grammar_fixer.py document.txt \
   --api [openai|ollama] \
   --api-base [API地址] \
   --model [模型名称] \
-  --output doc_fixes.patch
+  --output grammar_fixes.patch
 
 # 处理整个目录
 python grammar_fixer.py input_directory \
   --api [openai|ollama] \
   --api-base [API地址] \
   --model [模型名称] \
-  --output combined.patch
+  --output grammar_fixes.patch
 ```
 
 应用补丁文件：
