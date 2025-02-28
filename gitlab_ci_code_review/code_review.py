@@ -2,44 +2,7 @@ import os
 
 import requests
 
-# 配置参数
-GITLAB_URL = os.getenv("CI_API_V4_URL")
-PROJECT_ID = os.getenv("CI_PROJECT_ID")
-MR_IID = os.getenv("CI_MERGE_REQUEST_IID")
-GITLAB_TOKEN = os.getenv("GITLAB_TOKEN")
-LLM_API_URL = os.getenv("LLM_API_URL")
-LLM_API_KEY = os.getenv("LLM_API_KEY")
-LLM_API_MODEL = os.getenv("LLM_API_MODEL")
-LLM_API_MAXLEN = os.getenv("LLM_API_MAXLEN", "64000")
-
-
-def fetch_mr_diff():
-    """获取 Merge Request 的 Diff 内容"""
-    url = f"{GITLAB_URL}/projects/{PROJECT_ID}/merge_requests/{MR_IID}/changes"
-    headers = {"PRIVATE-TOKEN": GITLAB_TOKEN}
-
-    try:
-        response = requests.get(url, headers=headers)
-        response.raise_for_status()
-        changes = response.json().get("changes", [])
-        return "\n".join([change.get("diff", "") for change in changes])
-    except requests.exceptions.RequestException as e:
-        print(f"Error fetching MR diff: {e}")
-        return None
-
-
-def generate_review(diff_content):
-    """调用 LLM API 生成代码审查"""
-    if not diff_content:
-        return "Error: No diff content available for review."
-
-    url = f"{LLM_API_URL}/chat/completions"
-    headers = {
-        "Content-Type": "application/json",
-        "Authorization": f"Bearer {LLM_API_KEY}",
-    }
-
-    prompt = f"""# 角色设定
+DEFAULT_PROMPT = """# 角色设定
 你是一位资深软件开发工程师，正在进行严格的代码审查。请基于提供的代码diff内容，结合以下维度进行专业分析：
 
 # 审查维度
@@ -81,27 +44,28 @@ def generate_review(diff_content):
 6. 对整体质量给一个总结评分
 
 # 输出格式
-请用Markdown组织报告（但不必使用类似```markdown   ```这样的标记来包裹全文），包含以下章节：
+请用英文和Markdown格式来组织报告（但不必使用类似```markdown   ```这样的标记来包裹全文），主要包含以下章节：
 
-## 审查摘要
-- 关键问题数量
-- 优化建议数量
-- 整体质量评分（A-F等级）
-
-## 详细问题
+## 详细问题和建议
 按优先级排序，每个问题包含：
-- 🔺 [严重/重要/建议] 问题分类
+- 🔺 [严重/重要/一般/建议] 问题分类
 - 位置标记
 - 问题描述
 - 潜在风险
 - 改进建议
 
-## 优化建议
-- 可读性提升
-- 架构改进
-- 潜在扩展点
+## 整体性的问题和建议
+可以在此章节描述整体性的、不跟具体的代码位置有关的问题和建议。同样地，按优先级排序，每个问题包含：
+- 🔺 [严重/重要/一般/建议] 问题分类
+- 大致位置描述
+- 问题描述
+- 潜在风险
+- 改进建议
 
 ## 审查总结
+- 整体质量评分（10分制，输出中要包含分数的范围）
+- 关键问题数量
+- 优化建议数量
 - 最关键的三项改进
 - 推荐优先处理的问题
 - 长期维护建议
@@ -124,6 +88,45 @@ def generate_review(diff_content):
 {diff_content}
 """
 
+# 配置参数
+GITLAB_URL = os.getenv("CI_API_V4_URL")
+PROJECT_ID = os.getenv("CI_PROJECT_ID")
+MR_IID = os.getenv("CI_MERGE_REQUEST_IID")
+GITLAB_TOKEN = os.getenv("GITLAB_TOKEN")
+LLM_API_URL = os.getenv("LLM_API_URL")
+LLM_API_KEY = os.getenv("LLM_API_KEY")
+LLM_API_MODEL = os.getenv("LLM_API_MODEL")
+LLM_API_MAXLEN = os.getenv("LLM_API_MAXLEN", "64000")
+LLM_API_PROMPT = os.getenv("LLM_API_PROMPT", DEFAULT_PROMPT)
+
+
+def fetch_mr_diff():
+    """获取 Merge Request 的 Diff 内容"""
+    url = f"{GITLAB_URL}/projects/{PROJECT_ID}/merge_requests/{MR_IID}/changes"
+    headers = {"PRIVATE-TOKEN": GITLAB_TOKEN}
+
+    try:
+        response = requests.get(url, headers=headers)
+        response.raise_for_status()
+        changes = response.json().get("changes", [])
+        return "\n".join([change.get("diff", "") for change in changes])
+    except requests.exceptions.RequestException as e:
+        print(f"Error fetching MR diff: {e}")
+        return None
+
+
+def generate_review(diff_content):
+    """调用 LLM API 生成代码审查"""
+    if not diff_content:
+        return "Error: No diff content available for review."
+
+    url = f"{LLM_API_URL}/chat/completions"
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {LLM_API_KEY}",
+    }
+
+    prompt = LLM_API_PROMPT.format(diff_content=diff_content)
     data = {"model": LLM_API_MODEL, "messages": [{"role": "user", "content": prompt}]}
 
     try:
