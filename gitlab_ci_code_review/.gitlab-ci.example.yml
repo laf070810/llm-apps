@@ -3,13 +3,13 @@ stages:
 
 code_review:
   stage: review
-  image: python:3.11-slim
+  image: python:3.13
   tags:
     - code-review
   rules:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
   script:
     - git clone https://github.com/laf070810/llm-apps.git
-    - cd gitlab_ci_code_review
+    - cd llm-apps/gitlab_ci_code_review
     - pip install -r requirements.txt # 安装 Python 依赖
     - python code_review.py
