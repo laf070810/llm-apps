@@ -120,7 +120,11 @@ def generate_review(diff_content):
     }
 
     prompt = LLM_API_PROMPT.format(diff_content=diff_content)
-    data = {"model": LLM_API_MODEL, "messages": [{"role": "user", "content": prompt}]}
+    data = {
+        "model": LLM_API_MODEL,
+        "messages": [{"role": "user", "content": prompt}],
+        "stream": False,
+    }
 
     try:
         response = requests.post(url, headers=headers, json=data)
