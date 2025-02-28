@@ -113,7 +113,7 @@ def generate_review(diff_content):
     if not diff_content:
         return "Error: No diff content available for review."
 
-    url = f"{LLM_API_URL}/chat/completions"
+    url = f"{LLM_API_URL}"
     headers = {
         "Content-Type": "application/json",
         "Authorization": f"Bearer {LLM_API_KEY}",
