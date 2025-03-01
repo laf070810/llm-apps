@@ -86,6 +86,7 @@ GITLAB_URL = os.getenv("CI_API_V4_URL")
 PROJECT_ID = os.getenv("CI_PROJECT_ID")
 MR_IID = os.getenv("CI_MERGE_REQUEST_IID")
 GITLAB_TOKEN = os.getenv("GITLAB_TOKEN")
+LLM_API_TYPE = os.getenv("LLM_API_TYPE", "openai")
 LLM_API_URL = os.getenv("LLM_API_URL")
 LLM_API_KEY = os.getenv("LLM_API_KEY")
 LLM_API_MODEL = os.getenv("LLM_API_MODEL")
@@ -129,7 +130,12 @@ def generate_review(diff_content):
     try:
         response = requests.post(url, headers=headers, json=data)
         response.raise_for_status()
-        return response.json()["choices"][0]["message"]["content"]
+        if LLM_API_TYPE == "openai":
+            return response.json()["choices"][0]["message"]["content"]
+        elif LLM_API_TYPE == "ollama":
+            return response.json()["message"]["content"]
+        else:
+            raise Exception(f"unknown LLM_API_TYPE: {LLM_API_TYPE}")
     except Exception as e:
         return f"LLM API Error: {str(e)}"
 
