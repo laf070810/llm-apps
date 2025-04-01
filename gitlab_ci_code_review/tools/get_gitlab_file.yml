@@ -1,0 +1,176 @@
+openapi: 3.0.0
+info:
+  title: GitLab File Content API
+  description: 获取指定分支/标签/提交的文件内容
+  version: 1.0.0
+
+servers:
+  - url: https://git.tsinghua.edu.cn/api/v4
+    description: GitLab 服务器地址
+
+paths:
+  /projects/{id}/repository/files/{url_encoded_file_path}/raw:
+    get:
+      operationId: GetGitLabProjectFileContent
+      summary: 获取指定分支/标签/提交的文件内容
+      description: |
+        通过指定 `ref` 参数（分支名、标签名或提交SHA）获取对应版本的文件内容。
+        若未指定则默认返回仓库默认分支的内容（通常是 main/master）。
+      parameters:
+        - name: id
+          in: path
+          description: 项目 ID 或 URL 编码路径（如 `namespace%2Fproject`）
+          required: true
+          schema:
+            oneOf:
+              - type: integer
+                example: 123
+              - type: string
+                example: "namespace%2Fproject"
+        - name: url_encoded_file_path
+          in: path
+          description: 文件路径（需 URL 编码，如 `src%2Fmain.js`）
+          required: true
+          schema:
+            type: string
+            example: "src%2Fmain.js"
+        - name: ref
+          in: query
+          description: 目标分支/标签/提交（默认仓库默认分支）
+          required: false
+          schema:
+            type: string
+          example: "develop"
+      responses:
+        "200":
+          description: 成功返回文件内容
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: "console.log('Hello World');\n"
+        "401":
+          description: 未授权（缺少或无效的 Token）
+        "404":
+          description: 文件不存在或版本未更新
+      security:
+        - apiKey: []
+
+  /projects/{id}/repository/tree:
+    get:
+      tags:
+        - Repository
+      operationId: GetGitLabProjectFileTree
+      summary: Get repository tree structure
+      description: Retrieve files and directories of a repository at a given reference (branch/tag/commit).
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Project ID or URL-encoded path (e.g., `namespace%2Fproject`)
+          schema:
+            oneOf:
+              - type: integer
+                example: 123
+              - type: string
+                example: "namespace%2Fproject"
+        - name: ref
+          in: query
+          required: false
+          description: Branch, tag, or commit SHA (default is default branch)
+          schema:
+            type: string
+            example: "main"
+        - name: path
+          in: query
+          required: false
+          description: Subdirectory path
+          schema:
+            type: string
+            example: "src"
+        - name: recursive
+          in: query
+          required: false
+          description: Recursively list all subdirectories
+          schema:
+            type: string
+            enum: ["true", "1", "false", "0"]
+            default: "true"
+        - name: per_page
+          in: query
+          required: false
+          description: Number of items per page (default 20)
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+        - name: page
+          in: query
+          required: false
+          description: Page number
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+      responses:
+        "200":
+          description: Successfully retrieved repository tree
+          headers:
+            X-Total-Pages:
+              schema:
+                type: integer
+              description: Total number of pages
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    id:
+                      type: string
+                      description: File/directory unique identifier (SHA)
+                      example: "a1b2c3d4e5f6"
+                    name:
+                      type: string
+                      description: File/directory name
+                      example: "README.md"
+                    type:
+                      type: string
+                      enum: ["blob", "tree"]
+                      description: "blob = file, tree = directory"
+                    path:
+                      type: string
+                      description: Relative path to the item
+                      example: "src/main.js"
+                    mode:
+                      type: string
+                      description: File permissions mode
+                      example: "100644"
+        "401":
+          description: Unauthorized (invalid or missing token)
+        "404":
+          description: Project not found or path invalid
+      security:
+        - ApiKeyAuth: []
+
+components:
+  securitySchemes:
+    apiKey:
+      type: apiKey
+      in: header
+      name: PRIVATE-TOKEN
+  # 可选：定义复用结构（若使用 JSON 响应）
+  schemas:
+    FileContent:
+      type: object
+      properties:
+        content:
+          type: string
+          description: Base64 编码内容
+        encoding:
+          type: string
+          enum: [base64]
+        blob_id:
+          type: string

@@ -2,8 +2,10 @@ import os
 
 import requests
 
+from tools.llmapi import get_llm_response
+
 DEFAULT_PROMPT = """# 角色设定
-你是一位资深软件开发工程师，正在进行严格的代码审查。请基于提供的代码diff内容，结合以下维度进行专业分析：
+你是一位资深软件开发工程师，正在对一个Merge Request进行严格的代码审查。请基于提供的Merge Request的代码diff内容，结合以下维度进行专业分析：
 
 # 审查维度
 1. 代码质量
@@ -77,7 +79,20 @@ DEFAULT_PROMPT = """# 角色设定
 3. 对安全漏洞提供OWASP参考标准
 4. 性能建议需包含复杂度分析
 
-以下是你要审查的代码diff内容：
+当前仓库的ID是{project_id}，当前Merge Request的目标分支是{target_branch}。在审查的过程中，请**积极**使用工具来获取当前仓库目标分支的相关目录结构，并**积极**使用工具进一步获取目标分支中你想知道的可能相关的代码文件的具体内容。
+
+如果遇到不确定的情况，请自行决定做法，不要请求用户的输入。
+
+当你做出最终回答时，请严格按照上述的输出格式来输出Markdown内容，代码内容记得用Markdown格式的比如```python ```这样的标记来包裹。
+
+当前Merge Request的标题是：{title}
+
+
+以下是当前Merge Request的描述：
+{description}
+
+
+以下是你要审查的当前Merge Request的代码diff内容：
 {diff_content}
 """
 
@@ -94,7 +109,7 @@ LLM_API_MAXLEN = os.getenv("LLM_API_MAXLEN", "64000")
 LLM_API_PROMPT = os.getenv("LLM_API_PROMPT", DEFAULT_PROMPT)
 
 
-def fetch_mr_diff():
+def fetch_mr_info(field):
     """获取 Merge Request 的 Diff 内容"""
     url = f"{GITLAB_URL}/projects/{PROJECT_ID}/merge_requests/{MR_IID}/changes"
     headers = {"PRIVATE-TOKEN": GITLAB_TOKEN}
@@ -102,8 +117,8 @@ def fetch_mr_diff():
     try:
         response = requests.get(url, headers=headers)
         response.raise_for_status()
-        changes = response.json().get("changes", [])
-        return "\n".join([change.get("diff", "") for change in changes])
+        changes = response.json().get(field, [])
+        return str(changes)
     except requests.exceptions.RequestException as e:
         print(f"Error fetching MR diff: {e}")
         return None
@@ -115,27 +130,29 @@ def generate_review(diff_content):
         return "Error: No diff content available for review."
 
     url = f"{LLM_API_URL}"
-    headers = {
-        "Content-Type": "application/json",
-        "Authorization": f"Bearer {LLM_API_KEY}",
-    }
 
-    prompt = LLM_API_PROMPT.format(diff_content=diff_content)
-    data = {
-        "model": LLM_API_MODEL,
-        "messages": [{"role": "user", "content": prompt}],
-        "stream": False,
-    }
+    target_branch = fetch_mr_info("target_branch")
+    title = fetch_mr_info("title")
+    description = fetch_mr_info("description")
+
+    prompt = LLM_API_PROMPT.format(
+        diff_content=diff_content,
+        project_id=PROJECT_ID,
+        target_branch=target_branch,
+        title=title,
+        description=description,
+    )
+    print(f"\nprompt posted to LLM:\n{prompt}\n")
 
     try:
-        response = requests.post(url, headers=headers, json=data)
-        response.raise_for_status()
-        if LLM_API_TYPE == "openai":
-            return response.json()["choices"][0]["message"]["content"]
-        elif LLM_API_TYPE == "ollama":
-            return response.json()["message"]["content"]
-        else:
-            raise Exception(f"unknown LLM_API_TYPE: {LLM_API_TYPE}")
+        return get_llm_response(
+            api_type=LLM_API_TYPE,
+            api_base=url,
+            api_key=LLM_API_KEY,
+            model=LLM_API_MODEL,
+            prompt=prompt,
+            remove_thinking=True,
+        )
     except Exception as e:
         return f"LLM API Error: {str(e)}"
 
@@ -156,7 +173,7 @@ def post_comment_to_mr(comment):
 
 if __name__ == "__main__":
     # 执行流程
-    diff_content = fetch_mr_diff()
+    diff_content = fetch_mr_info("changes")
 
     if diff_content:
         print(f"Diff length: {len(diff_content)} characters")
@@ -166,6 +183,7 @@ if __name__ == "__main__":
     else:
         review = "Failed to generate code review due to missing diff."
 
+    review = review.replace("</details>", "</details>\n")
     review = f"**[AI Code Review]**\n\n{review}"
 
     post_comment_to_mr(review)
