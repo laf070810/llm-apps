@@ -1,10 +1,11 @@
 import os
+import re
 
 import requests
 
 from tools.llmapi import get_llm_response
 
-DEFAULT_PROMPT = """# 角色设定
+DEFAULT_PROMPT_CN = """# 角色设定
 你是一位资深软件开发工程师，正在对一个Merge Request进行严格的代码审查。请基于提供的Merge Request的代码diff内容，结合以下维度进行专业分析：
 
 # 审查维度
@@ -96,6 +97,101 @@ DEFAULT_PROMPT = """# 角色设定
 {diff_content}
 """
 
+DEFAULT_PROMPT_EN = """# Role Setup  
+You are a senior software development engineer conducting a rigorous code review of a Merge Request. Please perform a professional analysis based on the provided code diff content of the Merge Request, focusing on the following dimensions:  
+
+# Review Dimensions  
+1. **Code Quality**  
+   - Syntax/logic error risks  
+   - Boundary condition handling  
+   - Exception handling mechanisms  
+   - Resource management (memory/connection leaks)  
+   - Concurrency safety issues  
+   - Other code quality issues  
+
+2. **Maintainability**  
+   - Code readability (naming conventions, comment clarity)  
+   - Function complexity (suggest splitting overly long functions)  
+   - Duplicate code detection  
+   - Modularity  
+   - Other maintainability improvements  
+
+3. **Security Risks**  
+   - Injection vulnerabilities (SQL/command/XSS)  
+   - Sensitive data handling  
+   - Input validation mechanisms  
+   - Permission control flaws  
+   - Other security risks  
+
+4. **Performance Optimization**  
+   - Algorithm complexity  
+   - Redundant computations  
+   - Caching mechanisms  
+   - Batch processing opportunities  
+   - Other performance optimizations  
+
+# Analysis Requirements  
+1. Inspect all dimensions listed above item-by-item  
+2. Indicate specific code locations (e.g., @@ line number ranges)  
+3. Explain potential impacts of identified issues  
+4. Provide improvement suggestions with example code  
+5. Differentiate between critical issues and optimization recommendations  
+6. Provide an overall quality score  
+
+# Output Format  
+Organize the report in Markdown (without wrapping the entire content in ```markdown ``` blocks). Include the following sections:  
+
+## Code Change Summary  
+Summarize the main content of the code diff being reviewed (focus on the diff itself, not your recommendations).  
+
+## Detailed Issues and Recommendations  
+List items in priority order. For each issue:  
+- [🔺 Critical/⚠️ Important/🔵 Minor/💡 Suggestion] Issue category  
+- Location markers  
+- Description  
+- Potential risks  
+- Improvement suggestions  
+
+## Review Summary  
+- Overall quality score (0-10 scale)  
+- Issue category statistics  
+- Priority issues to address  
+- Long-term maintenance recommendations  
+
+# Example Output  
+For an unsafe memory operation:
+🔺 [Critical] Buffer overflow risk  
+Location: @@ -15,6 +15,7 @@ void process_data()  
+Issue: `strcpy` used with user input without length validation  
+Risk: Arbitrary code execution  
+Suggestion: Replace with `strncpy` or add length checks:  
+```c  
+strncpy(buffer, input, sizeof(buffer)-1);  
+```
+
+# Special Requirements  
+1. Label uncertain issues with **[Needs manual verification]**  
+2. Consider language-specific traits (e.g., exception chaining in Python, pointer usage in C++)  
+3. Reference OWASP standards for security vulnerabilities  
+4. Include complexity analysis for performance suggestions  
+
+Current repository ID: `{project_id}`  
+Merge Request target branch: `{target_branch}`  
+**Actively use tools** to:  
+1. Retrieve the target branch's directory structure  
+2. Fetch relevant code files from the target branch as needed  
+
+Proceed autonomously if uncertain.  
+
+Merge Request Title: {title}
+
+Merge Request Description:  
+{description}  
+
+Code Diff Content:  
+{diff_content}  
+"""
+
 # 配置参数
 GITLAB_URL = os.getenv("CI_API_V4_URL")
 PROJECT_ID = os.getenv("CI_PROJECT_ID")
@@ -106,7 +202,7 @@ LLM_API_URL = os.getenv("LLM_API_URL")
 LLM_API_KEY = os.getenv("LLM_API_KEY")
 LLM_API_MODEL = os.getenv("LLM_API_MODEL")
 LLM_API_MAXLEN = os.getenv("LLM_API_MAXLEN", "64000")
-LLM_API_PROMPT = os.getenv("LLM_API_PROMPT", DEFAULT_PROMPT)
+LLM_API_PROMPT = os.getenv("LLM_API_PROMPT", DEFAULT_PROMPT_EN)
 
 
 def fetch_mr_info(field):
@@ -184,6 +280,9 @@ if __name__ == "__main__":
         review = "Failed to generate code review due to missing diff."
 
     review = review.replace("</details>", "</details>\n")
-    review = f"**[AI Code Review]**\n\n{review}"
+    review = re.sub(r"(<details\b[^>]*?)\s+open(?=\s|>)", r"\1 close", review)
+
+    review = f'<details style="color:gray;background-color: #f8f8f8;padding: 8px;border-radius: 4px;" close> <summary>[AI Code Review]</summary>\n\n{review}\n</details>'
+    # review = f"**[AI Code Review]**\n\n{review}"
 
     post_comment_to_mr(review)

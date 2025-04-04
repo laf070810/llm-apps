@@ -52,7 +52,7 @@ paths:
         "401":
           description: 未授权（缺少或无效的 Token）
         "404":
-          description: 文件不存在或版本未更新
+          description: 文件不存在或版本未更新，也有可能是文件路径未正确编码（例如未将 `/` 转为 `%2F`）导致的
       security:
         - apiKey: []
 
@@ -99,12 +99,12 @@ paths:
         - name: per_page
           in: query
           required: false
-          description: Number of items per page (default 20)
+          description: Number of items per page (default 100)
           schema:
             type: integer
             minimum: 1
-            maximum: 100
-            default: 20
+            maximum: 100000
+            default: 100
         - name: page
           in: query
           required: false
