@@ -66,6 +66,7 @@ def is_text_file(filepath):
         ".ini",
         ".cfg",
         ".conf",
+        ".tex",
     ]
     ext = os.path.splitext(filepath)[1].lower()
     checks["extension"] = ext in text_extensions
