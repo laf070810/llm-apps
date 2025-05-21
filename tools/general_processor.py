@@ -85,6 +85,9 @@ class ChunkProcessor:
         self._save_processing_state()
 
     def process_all(self):
+        import threading
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
         # 收集所有需要处理的分块
         all_chunks = []
         for file_entry in self.manifest["files"]:
@@ -93,15 +96,44 @@ class ChunkProcessor:
         # 过滤已处理的分块
         pending_chunks = [c for c in all_chunks if c not in self.processed_chunks]
 
+        # 创建线程安全的进度条和状态锁
+        pbar_lock = threading.Lock()
+        state_lock = threading.Lock()
+
         # 使用进度条
         with tqdm(total=len(pending_chunks), desc="Processing chunks") as pbar:
-            for chunk in pending_chunks:
-                try:
-                    self._process_chunk(chunk)
-                except Exception as e:
-                    tqdm.write(f"Error processing {chunk}: {str(e)}")
-                finally:
-                    pbar.update(1)
+            with ThreadPoolExecutor(max_workers=self.args.concurrency) as executor:
+                futures = {
+                    executor.submit(
+                        self._process_chunk_threadsafe,
+                        chunk,
+                        pbar,
+                        pbar_lock,
+                        state_lock,
+                    ): chunk
+                    for chunk in pending_chunks
+                }
+
+                for future in as_completed(futures):
+                    chunk = futures[future]
+                    try:
+                        future.result()
+                    except Exception as e:
+                        with pbar_lock:
+                            pbar.write(f"Error processing {chunk}: {str(e)}")
+
+    def _process_chunk_threadsafe(self, chunk, pbar, pbar_lock, state_lock):
+        try:
+            # 处理分块的核心逻辑保持不变
+            self._process_chunk(chunk)
+        finally:
+            # 原子更新进度条和状态
+            with state_lock:
+                self.processed_chunks.add(chunk)
+                self._save_processing_state()
+
+            with pbar_lock:
+                pbar.update(1)
 
 
 def parse_args():
@@ -136,6 +168,9 @@ def parse_args():
     )
     parser.add_argument(
         "--api-options", default="{}", help="额外API选项（JSON格式字符串）"
+    )
+    parser.add_argument(
+        "--concurrency", type=int, default=1, help="并发处理数 (默认: 1)"
     )
 
     return parser.parse_args()

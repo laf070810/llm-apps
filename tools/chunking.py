@@ -2,13 +2,30 @@ import argparse
 import hashlib
 import json
 import os
+import re
 from pathlib import Path
 
 from is_text_file import is_text_file
 
 
+def find_double_newline(content, start, end):
+    haystack = content[start:end]
+    pattern = re.compile(rb"\n\s*\n")
+    matches = list(pattern.finditer(haystack))
+    if matches:
+        last_match = matches[-1]
+        split_pos = start + last_match.end()
+        return split_pos
+    return -1
+
+
 def find_split_point(content, start, end, encoding="utf-8"):
-    # 优先在换行符处分割
+    # 优先在双换行符处分割
+    split_pos = find_double_newline(content, start, end)
+    if split_pos != -1:
+        return split_pos  # 直接返回双换行符后的位置
+
+    # 其次在换行符处分割
     split_pos = content.rfind(b"\n", start, end)
     if split_pos != -1:
         return split_pos + 1  # 包含换行符
